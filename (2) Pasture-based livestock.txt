@@ -1,0 +1,54 @@
+%%Calculation of grassland potential biomass based on climate-based NDVI and assessment of maximum grazing livestock carrying capacity at county level
+
+clc
+clear
+
+%% Grassland pixels extraction
+Inpath='Y:\Carbon_removel\Grassland\China\resample\CLCD\';
+clcd=geotiffread([Inpath,'CLCD_2020.tif']);
+clcd=single(clcd);
+clcd(clcd~=4)=0;
+clcd(clcd==4)=1;
+
+
+%% Forage regrowth percentage
+Inpath='Y:\Carbon_removel\Grassland\China\Data\';
+reG=geotiffread([Inpath,'RegrowthR.tif']);
+reG=single(reG);
+reG=reG.*clcd;
+reG=reG*0.01;
+
+%% Conversion coefficient of standard hay
+S_grass=geotiffread([Inpath,'S_grass_F.tif']);
+S_grass=single(S_grass);
+S_grass=S_grass.*clcd;
+S_grass=S_grass*0.01;
+
+%% Utilization rate of rangeland
+grass_ur=geotiffread([Inpath,'grass_UR.tif']);
+grass_ur=single(grass_ur);
+grass_ur=grass_ur.*clcd;
+grass_ur=grass_ur*0.01;
+
+%% Actual utilization rate of grassland
+InPath='Y:\Carbon_removel\Grassland\Sub_ndvi\GI\';
+LineK=geotiffread([InPath,'LineK.tif']);
+LineK=single(LineK);
+LineK=LineK.*clcd;
+LineK(LineK<0)=1.2;
+LineK(LineK>0)=0.8;
+grass_ur1=grass_ur.*LineK;
+grass_ur1(grass_ur1==0&clcd==1)=0.5; %% Pixels of the grassland type base map that do not match the grassland base map
+
+%% Potential biomass and livestock carrying capacity
+Inpath='Y:\Carbon_removel\Grassland\Sub_ndvi\Sub_ndvi_025D\';
+[sub_ndvi,R]=geotiffread([Inpath,'sub_ndvi_2015.tif']);%% The climate-based NDVI (0.1°) output in (1) was resampled  to 0.0025°
+Info=geotiffinfo([Inpath,'sub_ndvi_2015.tif']);
+sub_ndvi=single(sub_ndvi);
+sub_ndvi=sub_ndvi.*clcd;
+sub_bio=(52.2*sub_ndvi.^2+173.9*sub_ndvi)*10; %% kg C/ha, Potential biomass
+T_sheep=(sub_bio.*(1+reG).*S_grass.*grass_ur1)*8.58/(0.6966*365);%% Livestock carrying capacity
+
+geotiffwrite('T_sheep_2015',T_sheep,R,'GeoKeyDirectoryTag', Info.GeoTIFFTags.GeoKeyDirectoryTag,'TiffType','bigtiff');
+
+%% By summarizing the maximum livestock carrying capacity of each grassland pixel in a county, the livestock carrying capacity of the county can be obtained, and then make a difference with the census county livestock data, if the value is greater than 0, it means that all the census livestock  are applicable to grazing, if it is less than 0, it means that the number of livestock grazed in the county is the number of livestock that can be carried in the county.

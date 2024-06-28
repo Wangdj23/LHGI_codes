@@ -1,0 +1,111 @@
+clc
+clear
+
+%% Grassland pixels extraction
+InPath=['M:/Carbon_removel/Grassland/China/resample/CLCD/'];
+InFile=strcat(InPath,'CLCD_2015.tif');
+CLCD=geotiffread(InFile);
+CLCD=single(CLCD);
+CLCD(CLCD~=4)=0;
+CLCD(CLCD==4)=1;
+
+%% Machine learning modeling with provincial administrative
+InPath=['Y:/Carbon_removel/Grassland/China/Data/'];
+InFile=strcat(InPath,'Xingzhengqu_01D_N.tif');
+Pro_01D=geotiffread(InFile);
+Pro_01D=single(Pro_01D);
+Pro_01D(Pro_01D==255)=0;
+Pro_01D(Pro_01D~=0)=1;%% Study region
+[row,col]=size(Pro_01D);
+std_ndvi_01D=zeros(row,col,'single');%% Storing the climate-based NDVI
+
+%%1: Inner Mongolia; 2: Xinjiang; 3: Gansu; 4: Hebei; 5: Ningxia; 7: Qinghai; 8: Sichuan; 9: Yunnan
+ Pro_01D(Pro_01D~=1)=0;
+ Pro_01D(Pro_01D==1)=1;%% Take Inner Mongolia as example
+ Pro_01D=Pro_01D.*Grass;
+ sy_bio=find(Pro_01D==1);
+ num=length(sy_bio);
+
+%% Environmental varibles
+BioPath='Y:\Carbon_removel\Grassland\China\resample\Climate_data\2015\';
+list_Bio = dir([BioPath,'*.tif']);
+filename = list_Bio(1).name;
+[bio1,b_R]=geotiffread([BioPath,list_Bio(1).name]);
+b_Info=geotiffinfo([BioPath,list_Bio(1).name]);
+[row,col]=size(bio1);
+all_Bio = zeros(length(list_Bio),num,'single');
+for i=1:length(list_Bio)
+    filename = list_Bio(i).name;
+    bio=geotiffread([BioPath,list_Bio(i).name]);
+    bio=bio(sy_bio);
+%     bio=reshape(bio,1,row*col);
+    all_Bio(i,:)=bio;
+end
+
+%%NDVI data, the maximum NDVI of each 0.1° x 0.1° pixel
+InPath='Y:\Carbon_removel\Grassland\China\resample\M_NDVI_01D\';
+InFile=strcat(InPath,'M_NDVI_01D_2015.tif');
+[ndvi,ndvi_R]=geotiffread(InFile);
+ndvi_info=geotiffinfo(InFile);
+ndvi=single(ndvi);
+ndvi=ndvi(sy_bio);
+
+sy=find(ndvi>0);
+sam_bio=all_Bio(:,sy);%% independent variable
+sam_ndvi=ndvi(sy);%% dependent variable
+
+[a,b]=size(sam_bio);
+sam_bio(a+1,:)=sam_ndvi;
+
+%% 4-fold cross-prediction (3 of the folds train the model and predict the climate-based NDVI at the location of the 4th fold)
+indices=crossvalind('Kfold',b,4);
+ for l=1:4
+     pre=(indices==l);
+     train=~pre;
+    
+     pre_data=sam_bio(1:a,pre);
+     pre_label=sam_bio(a+1,pre);
+     
+     train_data=sam_bio(1:a,train);
+     train_label=sam_bio(a+1,train);
+     
+     %% training and testing sets
+     train_ratio=0.75;
+     data_size=size(train_data,2);
+     cv=cvpartition(data_size,'Holdout',1-train_ratio);
+     train_indices=training(cv);
+     validation_indices=test(cv);
+     train_data_RF=train_data(:,train_indices);
+     train_label_RF=train_label(:,train_indices);
+     validation_data=train_data(:,validation_indices);
+     validation_label=train_label(:,validation_indices);
+     sy1=find(indices==l);
+     tp=sy_bio(sy(sy1));%% Position of the predicted pixel
+
+%% RF model
+tic
+leaf=5;
+ntrees=100;
+fboot=1;
+surrogate='on';
+disp('Training the tree bagger')
+b1 = TreeBagger(ntrees, train_data_RF',train_label_RF,'Method','regression','OOBPredictorImportance','on','oobvarimp','on', 'surrogate', 'on', 'minleaf',leaf,'FBoot',fboot);
+imp=b1.OOBPermutedPredictorDeltaError;
+toc
+yd=predict(b1,validation_data');
+R=corrcoef(yd,validation_label);
+R=R(1,2)*R(1,2);
+Relation(l)=R;
+md1=fitlm(validation_label,yd);
+a1=table2array(md1.Coefficients);
+coefficient=a1(2,1);
+C(l)=coefficient;
+rmse(l)=md1.RMSE;
+
+%% Reverse
+yd_pre=predict(b1,pre_data');
+std_ndvi_01D(tp)=yd_pre;
+end
+
+geotiffwrite('std_ndvi_01_S1',std_ndvi_01D,b_R,'GeoKeyDirectoryTag', b_Info.GeoTIFFTags.GeoKeyDirectoryTag,'TiffType','bigtiff');
+ 

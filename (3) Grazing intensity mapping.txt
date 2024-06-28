@@ -1,0 +1,68 @@
+%% Calculation of pixel-level grazing intensity 
+clc
+clear
+
+Inpath='Y:\Carbon_removel\Grassland\China\resample\CLCD\';
+clcd=geotiffread([Inpath,'CLCD_2015.tif']);
+clcd=single(clcd);
+clcd(clcd~=4)=0;
+clcd(clcd==4)=1;
+
+%% Climate-based biomass
+Inpath='Y:\Carbon_removel\Grassland\Sub_ndvi\Sub_ndvi_025D\';
+[sub_ndvi,R]=geotiffread([Inpath,'sub_ndvi_2015.tif']);
+Info=geotiffinfo([Inpath,'sub_ndvi_2015.tif']);
+sub_ndvi=single(sub_ndvi);
+sub_ndvi=sub_ndvi.*clcd;
+s=sub_ndvi;
+s(s~=0)=1;
+sub_bio=(52.2*sub_ndvi.^2+173.9*sub_ndvi)*10;
+
+%% The number of grazing livestock in each county, with the pixel value indicating the number of grazing livestock in the county 
+Inpath='Y:\Carbon_removel\Grassland\Sub_ndvi\Sub_ndvi_025D\Other\';
+sum_sheep=geotiffread([Inpath,'sheep_2015_c.tif']);
+sum_sheep=single(sum_sheep);
+
+%% The county code used to traverse each county in turn
+DM=geotiffread([Inpath,'2015_DM.tif']);
+DM=single(DM);
+%DM(DM>500)=0;
+
+%%Satellite-based biomass
+Inpath='Y:\Carbon_removel\Grassland\China\resample\M_NDVI\';
+m_ndvi=geotiffread([Inpath,'M_NDVI_2015.tif']);%% Satellite-based NDVI
+m_ndvi=single(m_ndvi);
+m_ndvi=m_ndvi*0.001;
+m_ndvi=m_ndvi.*s;
+m_ndvi(m_ndvi<0)=0;
+m_bio=(52.2*m_ndvi.^2+173.9*m_ndvi)*10;%kg C ha-1
+sub_bio(sub_bio<0)=0;
+
+%  dif_ndvi=sub_ndvi-m_ndvi;
+%  dif_ndvi(dif_ndvi<0)=0;
+dif_bio=sub_bio-m_bio;%%Grassland utilization intensity
+dif_bio(dif_bio<0)=0;
+
+sum_bio=DM;
+for i=1:213%% 213 counties
+    sy=find(DM==i);
+    s=sum(dif_bio(sy));
+    sum_bio(sy)=s;
+end
+
+%% Allocate county-level livestock to the pixel level using dif_bio as weights 
+[a,b]=size(sum_bio);
+for i=1:a
+    for j=1:b
+        if sum_bio(i,j)==0
+            continue
+        else
+            sum_bio(i,j)=1/sum_bio(i,j);
+        end
+    end
+end
+
+GI=dif_bio.*sum_bio.*sum_sheep;
+GI=GI/S; %% Stadard sheep unit (SU/ha)
+GI(find(isnan(GI)==1))=0;
+geotiffwrite('GI_2015',GI,R,'GeoKeyDirectoryTag', Info.GeoTIFFTags.GeoKeyDirectoryTag,'TiffType','bigtiff');
