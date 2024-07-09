@@ -14,8 +14,6 @@ InPath=['Y:/Carbon_removel/Grassland/China/Data/'];
 InFile=strcat(InPath,'Xingzhengqu_01D_N.tif');
 Pro_01D=geotiffread(InFile);
 Pro_01D=single(Pro_01D);
-Pro_01D(Pro_01D==255)=0;
-Pro_01D(Pro_01D~=0)=1;%% Study region
 [row,col]=size(Pro_01D);
 std_ndvi_01D=zeros(row,col,'single');%% Storing the climate-based NDVI
 
